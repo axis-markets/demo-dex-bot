@@ -1,5 +1,5 @@
 //Stub out config.js so indexer-client can require it without TRADER_SECRET.
-jest.mock('../src/config.js', () => ({INDEXER_URL: 'http://test.local'}), {virtual: false})
+jest.mock('../src/config.js', () => ({indexerUrl: 'http://test.local'}), {virtual: false})
 
 const {getOrders, getOrdersPaginated} = require('../src/indexer-client.js')
 

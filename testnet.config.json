@@ -1,0 +1,35 @@
+{
+  "axisContractId": "CBEZ2CDRLUBPDX5ML5TX6LR5L2SCQUXSMNIJFWC4QPKO4CS4I7E2LDFK",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "sorobanRpcUrl": "https://soroban-testnet.stellar.org",
+  "indexerUrl": "http://localhost:8070",
+  "priceStddev": 0.04,
+  "amountMin": 0.01,
+  "amountMax": 0.2,
+  "maxPositions": 60,
+  "tradeMin": 5,
+  "tradeMax": 10,
+  "decimals": 7,
+  "tokens": [
+    {
+      "token": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "symbol": "USDC",
+      "price": 1
+    },
+    {
+      "token": "CCUUDM434BMZMYWYDITHFXHDMIVTGGD6T2I5UKNX5BSLXLW7HVR4MCGZ",
+      "symbol": "EURC",
+      "price": 1.2
+    },
+    {
+      "token": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "symbol": "XLM",
+      "price": 0.22
+    },
+    {
+      "token": "CC72F57YTPX76HAA64JQOEGHQAPSADQWSY5DWVBR66JINPFDLNCQYHIC",
+      "symbol": "CETES",
+      "price": 0.066
+    }
+  ]
+}

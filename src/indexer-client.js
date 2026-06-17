@@ -1,4 +1,4 @@
-const {INDEXER_URL} = require('./config.js')
+const {indexerUrl} = require('./config.js')
 
 /**
  * @typedef {Object} IndexerOrder
@@ -19,7 +19,7 @@ const {INDEXER_URL} = require('./config.js')
  */
 
 async function request(path, params, signal) {
-    const url = new URL(INDEXER_URL + path)
+    const url = new URL(indexerUrl + path)
     if (params) {
         for (const [k, v] of Object.entries(params)) {
             if (v == null) continue

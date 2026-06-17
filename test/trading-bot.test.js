@@ -1,5 +1,5 @@
 //Mock config and indexer-client BEFORE requiring trading-bot.
-jest.mock('../src/config.js', () => ({INDEXER_URL: 'http://test.local'}), {virtual: false})
+jest.mock('../src/config.js', () => ({indexerUrl: 'http://test.local'}), {virtual: false})
 jest.mock('../src/indexer-client.js', () => ({
     getOrders: jest.fn(),
     getOrdersPaginated: jest.fn()
@@ -14,17 +14,32 @@ const QUOTE = 'QUOTE_CONTRACT'
 const OrderKind = {Limit: 1, Fill: 2, FillOrKill: 3}
 
 const baseConfig = {
-    BASE_CONTRACT: BASE,
-    QUOTE_CONTRACT: QUOTE,
-    BASE_DECIMALS: 7,
-    QUOTE_DECIMALS: 7,
-    REFERENCE_PRICE: 1.2,
-    PRICE_STDDEV: 0.02,
-    AMOUNT_MIN: 0.01,
-    AMOUNT_MAX: 0.2,
-    MAX_POSITIONS: 15,
-    TRADE_MIN: 180,
-    TRADE_MAX: 300
+    decimals: 7,
+    priceStddev: 0.02,
+    amountMin: 0.01,
+    amountMax: 0.2,
+    maxPositions: 15,
+    tradeMin: 180,
+    tradeMax: 300,
+    //BASE priced 1.2, QUOTE priced 1.0 → cross reference price 1.2 (quote per base)
+    tokens: [
+        {token: BASE, symbol: 'BASE', price: 1.2},
+        {token: QUOTE, symbol: 'QUOTE', price: 1.0}
+    ]
+}
+
+//With a 2-token array, sampleTwo draws two randoms: i = floor(r1*2), then j over
+//[0..0] bumped past i. r=0.1 → i=0, j=1 → [BASE, QUOTE]; subsequent randoms drive
+//side/price/amount. These helpers make the pair + side deterministic in tests.
+function randoms(...seq) {
+    const spy = jest.spyOn(Math, 'random')
+    for (const v of seq) spy.mockReturnValueOnce(v)
+    spy.mockReturnValue(seq.length ? seq[seq.length - 1] : 0.5)
+    return spy
+}
+//pair = [BASE, QUOTE]; then `sideSeed` selects the side (<0.5 buy, else sell)
+function pairBaseQuote(sideSeed) {
+    return randoms(0.1, 0.1, sideSeed, 0.5)
 }
 
 function makeAxisMock() {
@@ -90,7 +105,7 @@ describe('TradingBot.tradeOnce', () => {
 
     test('sell: payload routes base→quote', async () => {
         const {bot, axis} = makeBot()
-        jest.spyOn(Math, 'random').mockReturnValue(0.9) //side='sell'
+        pairBaseQuote(0.9) //pair [BASE, QUOTE], side='sell'
         mockIndexer({book: [], own: []})
 
         await bot.tradeOnce()
@@ -117,9 +132,7 @@ describe('TradingBot.tradeOnce', () => {
 
     test('passes crossing order ids derived from the fresh orderbook fetch', async () => {
         const {bot, axis} = makeBot()
-        jest.spyOn(Math, 'random')
-            .mockReturnValueOnce(0.0)   //side='buy'
-            .mockReturnValue(0.5)
+        pairBaseQuote(0.0) //pair [BASE, QUOTE], side='buy'
         mockIndexer({
             book: [
                 {id: 'a1', status: 'ACTIVE', selling: BASE, buying: QUOTE, rprice: 0.9},
@@ -154,7 +167,7 @@ describe('TradingBot.enforceMaxPositions', () => {
     afterEach(() => jest.restoreAllMocks())
 
     test('does nothing when active count ≤ MAX_POSITIONS', async () => {
-        const {bot, axis} = makeBot({config: {MAX_POSITIONS: 3}})
+        const {bot, axis} = makeBot({config: {maxPositions: 3}})
         getOrdersPaginated.mockResolvedValue([
             {id: '1', status: 'ACTIVE', created: '100'},
             {id: '2', status: 'ACTIVE', created: '200'}
@@ -164,7 +177,7 @@ describe('TradingBot.enforceMaxPositions', () => {
     })
 
     test('cancels oldest by `created` when exceeding cap', async () => {
-        const {bot, axis} = makeBot({config: {MAX_POSITIONS: 2}})
+        const {bot, axis} = makeBot({config: {maxPositions: 2}})
         getOrdersPaginated.mockResolvedValue([
             {id: '10', status: 'ACTIVE', created: '300'},
             {id: '20', status: 'ACTIVE', created: '100'},   //oldest
@@ -179,7 +192,7 @@ describe('TradingBot.enforceMaxPositions', () => {
     })
 
     test('ignores non-ACTIVE orders when counting', async () => {
-        const {bot, axis} = makeBot({config: {MAX_POSITIONS: 1}})
+        const {bot, axis} = makeBot({config: {maxPositions: 1}})
         getOrdersPaginated.mockResolvedValue([
             {id: '1', status: 'FILLED', created: '50'},
             {id: '2', status: 'ACTIVE', created: '100'},
@@ -190,7 +203,7 @@ describe('TradingBot.enforceMaxPositions', () => {
     })
 
     test('falls back to id ordering when created is missing', async () => {
-        const {bot, axis} = makeBot({config: {MAX_POSITIONS: 1}})
+        const {bot, axis} = makeBot({config: {maxPositions: 1}})
         getOrdersPaginated.mockResolvedValue([
             {id: '30', status: 'ACTIVE'},
             {id: '10', status: 'ACTIVE'},

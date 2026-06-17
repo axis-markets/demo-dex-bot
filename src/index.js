@@ -7,13 +7,13 @@ const TradingBot = require('./trading-bot.js')
     //contract-client is published as ESM-only — load via dynamic import from CJS
     const {AxisContractClient, OrderKind} = await import('@axis-markets/contract-client/src/index.js')
 
-    const keypair = Keypair.fromSecret(cfg.TRADER_SECRET)
+    const keypair = Keypair.fromSecret(cfg.traderSecret)
     const axis = new AxisContractClient({
         publicKey: keypair.publicKey(),
-        signTransaction: makeSignTransaction(keypair, cfg.NETWORK_PASSPHRASE),
-        rpcUrl: cfg.SOROBAN_RPC_URL,
-        contractId: cfg.AXIS_CONTRACT_ID,
-        networkPassphrase: cfg.NETWORK_PASSPHRASE
+        signTransaction: makeSignTransaction(keypair, cfg.networkPassphrase),
+        rpcUrl: cfg.sorobanRpcUrl,
+        contractId: cfg.axisContractId,
+        networkPassphrase: cfg.networkPassphrase
     })
 
     const bot = new TradingBot({axis, OrderKind, trader: keypair.publicKey(), config: cfg})
@@ -29,9 +29,9 @@ const TradingBot = require('./trading-bot.js')
     process.on('SIGINT', shutdown)
     process.on('SIGTERM', shutdown)
 
-    console.log(`[bot] trader=${keypair.publicKey()}`)
-    console.log(`[bot] pair=EURC/USDC ref=${cfg.REFERENCE_PRICE} stddev=${cfg.PRICE_STDDEV} amount=(${cfg.AMOUNT_MIN}..${cfg.AMOUNT_MAX})`)
-    console.log(`[bot] indexer=${cfg.INDEXER_URL} rpc=${cfg.SOROBAN_RPC_URL} contract=${cfg.AXIS_CONTRACT_ID}`)
+    console.log(`[bot] config=${cfg.configName} trader=${keypair.publicKey()}`)
+    console.log(`[bot] tokens=${cfg.tokens.map(t => t.symbol).join(',')} stddev=${cfg.priceStddev} amount=(${cfg.amountMin}..${cfg.amountMax}) maxPositions=${cfg.maxPositions}`)
+    console.log(`[bot] indexer=${cfg.indexerUrl} rpc=${cfg.sorobanRpcUrl} contract=${cfg.axisContractId}`)
     bot.start()
 })().catch(e => {
     console.error('[bot] fatal:', e)

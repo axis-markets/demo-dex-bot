@@ -1,7 +1,7 @@
 const {getOrdersPaginated} = require('./indexer-client.js')
 const {pickCrossingOrderIds} = require('./orderbook-utils.js')
 const {humanToRaw, displayPriceToContract} = require('./amount-format.js')
-const {gaussRandom, uniform, randomInt, randomSide} = require('./gauss-random.js')
+const {gaussRandom, uniform, randomInt, randomSide, sampleTwo} = require('./gauss-random.js')
 
 /**
  * @typedef {Object} TradingBotDeps
@@ -58,31 +58,35 @@ class TradingBot {
         } catch (e) {
             console.error('[bot] trade failed:', e.message || e)
         }
-        this.scheduleTrade(randomInt(this.cfg.TRADE_MIN, this.cfg.TRADE_MAX) * 1000)
+        this.scheduleTrade(randomInt(this.cfg.tradeMin, this.cfg.tradeMax) * 1000)
     }
 
     /** @private */
     async tradeOnce() {
-        const {BASE_CONTRACT, QUOTE_CONTRACT, BASE_DECIMALS, QUOTE_DECIMALS,
-            REFERENCE_PRICE, PRICE_STDDEV, AMOUNT_MIN, AMOUNT_MAX} = this.cfg
+        const {tokens, decimals, priceStddev, amountMin, amountMax} = this.cfg
+
+        //pick a random pair; reference price = USD cross price (quote per base)
+        const [base, quote] = sampleTwo(tokens)
+        const referencePrice = base.price / quote.price
+        const stddev = referencePrice * priceStddev //priceStddev is relative to the reference
 
         const side = randomSide()
-        const priceNum = Math.max(0.0001, gaussRandom(REFERENCE_PRICE, PRICE_STDDEV))
-        const amountNum = uniform(AMOUNT_MIN, AMOUNT_MAX)
+        const priceNum = Math.max(0.0001, gaussRandom(referencePrice, stddev))
+        const amountNum = uniform(amountMin, amountMax)
         const priceStr = priceNum.toFixed(7)
-        const amountStr = amountNum.toFixed(BASE_DECIMALS)
+        const amountStr = amountNum.toFixed(decimals)
 
-        const selling = side === 'buy' ? QUOTE_CONTRACT : BASE_CONTRACT
-        const buying = side === 'buy' ? BASE_CONTRACT : QUOTE_CONTRACT
+        const selling = side === 'buy' ? quote.token : base.token
+        const buying = side === 'buy' ? base.token : quote.token
 
         //amount is always base raw — buy() takes "buying to acquire" (=base), sell() takes "selling to sell" (=base)
-        const amount = humanToRaw(amountStr, BASE_DECIMALS)
-        const price = displayPriceToContract(priceStr, BASE_DECIMALS, QUOTE_DECIMALS)
+        const amount = humanToRaw(amountStr, decimals)
+        const price = displayPriceToContract(priceStr, decimals, decimals)
 
         //fetch a fresh orderbook snapshot right before computing crossings, so the
         //ids we send to buy()/sell() reflect the indexer's current state
-        const rawOrders = await this.fetchOrderbook()
-        const orders = pickCrossingOrderIds(rawOrders, side, priceNum, BASE_CONTRACT, QUOTE_CONTRACT)
+        const rawOrders = await this.fetchOrderbook(base.token, quote.token)
+        const orders = pickCrossingOrderIds(rawOrders, side, priceNum, base.token, quote.token)
 
         const payload = {
             kind: this.OrderKind.Limit,
@@ -94,7 +98,7 @@ class TradingBot {
             orders
         }
 
-        console.log(`[bot] ${side.toUpperCase()} ${amountStr} @ ${priceStr} (book: ${rawOrders.length}, crossings: ${orders.length})`)
+        console.log(`[bot] ${side.toUpperCase()} ${amountStr} ${base.symbol}/${quote.symbol} @ ${priceStr} (ref ${referencePrice.toFixed(7)}, book: ${rawOrders.length}, crossings: ${orders.length})`)
         const [soldRaw, boughtRaw, newOrderId] = side === 'buy'
             ? await this.axis.buy(payload)
             : await this.axis.sell(payload)
@@ -104,28 +108,30 @@ class TradingBot {
     }
 
     /**
-     * Fetch the current pair-wide active orderbook from the indexer.
+     * Fetch the current active orderbook for a pair from the indexer.
      * Failures bubble up so `runTradeTick()`'s catch logs them and the loop reschedules.
      * @private
+     * @param {string} baseToken
+     * @param {string} quoteToken
      * @return {Promise<Array<import('./indexer-client.js').IndexerOrder>>}
      */
-    fetchOrderbook() {
+    fetchOrderbook(baseToken, quoteToken) {
         return getOrdersPaginated({
-            asset: [this.cfg.BASE_CONTRACT, this.cfg.QUOTE_CONTRACT],
+            asset: [baseToken, quoteToken],
             maxTotal: 1000
         })
     }
 
     /** @private */
     async enforceMaxPositions() {
+        //count the bot's active orders across ALL pairs — the cap is global
         const own = await getOrdersPaginated({
             owner: this.trader,
-            asset: [this.cfg.BASE_CONTRACT, this.cfg.QUOTE_CONTRACT],
-            maxTotal: 200
+            maxTotal: 1000
         })
         const active = own.filter(o => o.status === 'ACTIVE')
-        if (active.length <= this.cfg.MAX_POSITIONS) {
-            console.log(`[bot] active positions: ${active.length}/${this.cfg.MAX_POSITIONS}`)
+        if (active.length <= this.cfg.maxPositions) {
+            console.log(`[bot] active positions: ${active.length}/${this.cfg.maxPositions}`)
             return
         }
         //sort oldest first by `created` (fallback to id since order ids are monotonic u64)
@@ -134,7 +140,7 @@ class TradingBot {
             const bc = Number(b.created ?? b.id)
             return ac - bc
         })
-        const excess = active.length - this.cfg.MAX_POSITIONS
+        const excess = active.length - this.cfg.maxPositions
         const toCancel = active.slice(0, excess).map(o => BigInt(o.id))
         console.log(`[bot] evicting ${toCancel.length} oldest orders: ${toCancel.map(String).join(',')}`)
         await this.axis.cancel(toCancel, this.trader)

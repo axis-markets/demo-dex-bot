@@ -1,4 +1,4 @@
-const {gaussRandom, uniform, randomInt, randomSide} = require('../src/gauss-random.js')
+const {gaussRandom, uniform, randomInt, randomSide, sampleTwo} = require('../src/gauss-random.js')
 
 describe('gaussRandom', () => {
     test('mean and stddev approach configured values over many samples', () => {
@@ -46,6 +46,34 @@ describe('randomInt', () => {
         }
         //should hit every value in the range eventually
         expect(seen.size).toBe(5)
+    })
+})
+
+describe('sampleTwo', () => {
+    test('returns two distinct members of the input', () => {
+        const arr = ['a', 'b', 'c', 'd']
+        for (let i = 0; i < 1000; i++) {
+            const [x, y] = sampleTwo(arr)
+            expect(arr).toContain(x)
+            expect(arr).toContain(y)
+            expect(x).not.toBe(y)
+        }
+    })
+
+    test('eventually covers every element across both positions', () => {
+        const arr = ['a', 'b', 'c']
+        const seen = new Set()
+        for (let i = 0; i < 1000; i++) {
+            const [x, y] = sampleTwo(arr)
+            seen.add(x)
+            seen.add(y)
+        }
+        expect(seen.size).toBe(3)
+    })
+
+    test('throws when fewer than 2 elements', () => {
+        expect(() => sampleTwo(['only'])).toThrow()
+        expect(() => sampleTwo([])).toThrow()
     })
 })
 
