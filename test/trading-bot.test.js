@@ -95,10 +95,10 @@ describe('TradingBot.tradeOnce', () => {
         const ratio = Number(payload.price) / 1e18
         expect(ratio).toBeGreaterThan(0.8)
         expect(ratio).toBeLessThan(1.6)
-        //amount in (0.01..0.2) × 10^7
+        //amount = uniform(0.01..0.2) USD / base price (1.2) → base-token units × 10^7
         const amountHuman = Number(payload.amount) / 1e7
-        expect(amountHuman).toBeGreaterThanOrEqual(0.01)
-        expect(amountHuman).toBeLessThanOrEqual(0.2)
+        expect(amountHuman).toBeGreaterThanOrEqual(0.01 / 1.2)
+        expect(amountHuman).toBeLessThanOrEqual(0.2 / 1.2)
         //empty book → no crossings
         expect(payload.orders).toEqual([])
     })
@@ -133,11 +133,12 @@ describe('TradingBot.tradeOnce', () => {
     test('passes crossing order ids derived from the fresh orderbook fetch', async () => {
         const {bot, axis} = makeBot()
         pairBaseQuote(0.0) //pair [BASE, QUOTE], side='buy'
+        //prices are raw i128 "buying per selling" (quote-per-base for asks); limit ≈ 1.17
         mockIndexer({
             book: [
-                {id: 'a1', status: 'ACTIVE', selling: BASE, buying: QUOTE, rprice: 0.9},
-                {id: 'a2', status: 'ACTIVE', selling: BASE, buying: QUOTE, rprice: 10.0},  //too high
-                {id: 'b1', status: 'ACTIVE', selling: QUOTE, buying: BASE, rprice: 1.0}    //wrong side
+                {id: 'a1', status: 'ACTIVE', selling: BASE, buying: QUOTE, price: '900000000000000000'},     //0.9 ≤ limit → cross
+                {id: 'a2', status: 'ACTIVE', selling: BASE, buying: QUOTE, price: '10000000000000000000'},   //10 → too high
+                {id: 'b1', status: 'ACTIVE', selling: QUOTE, buying: BASE, price: '1000000000000000000'}     //wrong side for a buy
             ],
             own: []
         })

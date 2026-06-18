@@ -72,7 +72,9 @@ class TradingBot {
 
         const side = randomSide()
         const priceNum = Math.max(0.0001, gaussRandom(referencePrice, stddev))
-        const amountNum = uniform(amountMin, amountMax)
+        //amountMin/amountMax are in USD; convert to base-token units via the base reference price
+        const amountUsd = uniform(amountMin, amountMax)
+        const amountNum = amountUsd / base.price
         const priceStr = priceNum.toFixed(7)
         const amountStr = amountNum.toFixed(decimals)
 
@@ -84,9 +86,10 @@ class TradingBot {
         const price = displayPriceToContract(priceStr, decimals, decimals)
 
         //fetch a fresh orderbook snapshot right before computing crossings, so the
-        //ids we send to buy()/sell() reflect the indexer's current state
+        //ids we send to buy()/sell() reflect the indexer's current state. Pass the
+        //raw i128 `price` (not the float) so selection mirrors the contract exactly.
         const rawOrders = await this.fetchOrderbook(base.token, quote.token)
-        const orders = pickCrossingOrderIds(rawOrders, side, priceNum, base.token, quote.token)
+        const orders = pickCrossingOrderIds(rawOrders, side, price, base.token, quote.token)
 
         const payload = {
             kind: this.OrderKind.Limit,
@@ -98,7 +101,7 @@ class TradingBot {
             orders
         }
 
-        console.log(`[bot] ${side.toUpperCase()} ${amountStr} ${base.symbol}/${quote.symbol} @ ${priceStr} (ref ${referencePrice.toFixed(7)}, book: ${rawOrders.length}, crossings: ${orders.length})`)
+        console.log(`[bot] ${side.toUpperCase()} ${amountStr} ${base.symbol} (~$${amountUsd.toFixed(4)})/${quote.symbol} @ ${priceStr} (ref ${referencePrice.toFixed(7)}, book: ${rawOrders.length}, crossings: ${orders.length})`)
         const [soldRaw, boughtRaw, newOrderId] = side === 'buy'
             ? await this.axis.buy(payload)
             : await this.axis.sell(payload)

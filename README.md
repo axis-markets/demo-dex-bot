@@ -16,7 +16,7 @@ On each trade tick the bot:
 2. **Derives a reference price** — the USD cross price of the pair, `base.price / quote.price` (quote per base), using the indicative USD prices in config.
 3. **Picks a side** — buy or sell, 50/50 at random (no directional bias).
 4. **Picks a price** — drawn from a Gaussian (normal) distribution centered on the reference price with a **relative** standard deviation `referencePrice × priceStddev` (clamped to a small positive minimum).
-5. **Picks an amount** — drawn uniformly from `[amountMin, amountMax]`, denominated in the base asset.
+5. **Picks an amount** — a **USD** value drawn uniformly from `[amountMin, amountMax]`, converted to base-token units by dividing by the base token's reference price.
 6. **Fetches a fresh order book** snapshot for the pair from the AXIS indexer.
 7. **Selects crossing orders** — resting orders that cross its limit price (cheapest asks when buying, highest bids when selling), best-first, capped at **20** order IDs to bound transaction size.
 8. **Submits the order** via `axis.buy()` / `axis.sell()` as a `Limit` order, passing the crossing IDs to fill against.
@@ -75,7 +75,7 @@ The traded universe is defined entirely by the `tokens` list in the config file 
 ### Notable implementation details
 
 - **Price scaling** (`displayPriceToContract`): `contract_price = displayPrice × 10^(18 + quoteDecimals − baseDecimals)`. All tokens share a single `decimals`, so this reduces to `× 10^18`. Pass prices as strings to avoid IEEE-754 drift at large scale.
-- **Crossing logic**: a *buy* at price `P` crosses asks with `rprice ≤ P`; a *sell* at `P` crosses bids whose effective price (`1 / rprice`) is `≥ P`. See [src/orderbook-utils.js](src/orderbook-utils.js).
+- **Crossing logic**: `pickCrossingOrderIds` mirrors the contract's `match_orders` exactly, comparing the maker's raw i128 `price` ("buying per selling") against the taker's limit — `order.price ≤ limit` for a buy, `order.price ≤ invert(limit)` for a sell — so the ids sent only include orders the contract will actually fill. It does **not** rely on the indexer's `rprice`. See [src/orderbook-utils.js](src/orderbook-utils.js).
 - **Amount semantics**: the order `amount` is always expressed in **base** raw units for both `buy()` and `sell()`.
 - **Resilience**: a failed trade tick is caught and logged; the loop reschedules and continues.
 
@@ -129,7 +129,7 @@ The selected file (e.g. [testnet.config.json](testnet.config.json)) holds all no
 | `indexerUrl` | `http://localhost:8070` | AXIS indexer base URL. Defaults shown; trailing slash stripped. |
 | `decimals` | `7` | Decimal precision **shared by all tokens**. |
 | `priceStddev` | `0.04` | **Relative** standard deviation of the price distribution (fraction of the reference price). |
-| `amountMin` / `amountMax` | `0.01` / `0.2` | Order-size range (base units), sampled uniformly. |
+| `amountMin` / `amountMax` | `0.01` / `0.2` | Order-size range in **USD**, sampled uniformly, then converted to base-token units by dividing by the base token's reference price. |
 | `maxPositions` | `40` | Max concurrent active orders **across all pairs** before the oldest are cancelled. |
 | `tradeMin` / `tradeMax` | `5` / `10` | Delay range between trades, in **seconds**. |
 | `tokens` | *(array, ≥ 2)* | Tradable tokens. Each: `{ "token": "C…", "symbol": "USDC", "price": 1 }` — contract address, friendly symbol for logs, and indicative **USD** price used to derive cross prices. |
@@ -151,7 +151,7 @@ On startup the bot logs the loaded config name, trader address, token list, and 
 [bot] tokens=USDC,EURC,XLM,CETES stddev=0.04 amount=(0.01..0.2) maxPositions=40
 [bot] indexer=http://localhost:8070 rpc=https://soroban-testnet.stellar.org contract=CBEZ...LDFK
 [bot] next trade in 0s
-[bot] BUY 0.1234567 EURC/USDC @ 1.2050000 (ref 1.2000000, book: 8, crossings: 2)
+[bot] BUY 0.1234567 EURC (~$0.1481)/USDC @ 1.2050000 (ref 1.2000000, book: 8, crossings: 2)
 [bot] result: sold=0 bought=5000000 newOrderId=42
 [bot] active positions: 8/40
 [bot] next trade in 7s
