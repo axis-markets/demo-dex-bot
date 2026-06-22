@@ -1,14 +1,14 @@
 {
-  "axisContractId": "CAOOEZTN62DBQKQYPEORZDWJ4D3PRU2ZJ5L53LIKA42G62JX5BQSKWWS",
+  "axisContractId": "CCJQB4EEQLBL7RHIPYMYG26ZT2QRKEYNGVWWL2EPZCECFI6GZGNXMIEX",
   "networkPassphrase": "Test SDF Network ; September 2015",
   "sorobanRpcUrl": "https://soroban-testnet.stellar.org",
   "indexerUrl": "http://localhost:8070",
   "priceStddev": 0.04,
-  "amountMin": 0.01,
+  "amountMin": 0.05,
   "amountMax": 0.2,
-  "maxPositions": 60,
-  "tradeMin": 5,
-  "tradeMax": 10,
+  "maxPositions": 100,
+  "tradeMin": 6,
+  "tradeMax": 7,
   "decimals": 7,
   "tokens": [
     {
