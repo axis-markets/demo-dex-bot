@@ -2,7 +2,7 @@
   "axisContractId": "CCJQB4EEQLBL7RHIPYMYG26ZT2QRKEYNGVWWL2EPZCECFI6GZGNXMIEX",
   "networkPassphrase": "Test SDF Network ; September 2015",
   "sorobanRpcUrl": "https://soroban-testnet.stellar.org",
-  "indexerUrl": "http://localhost:8070",
+  "indexerUrl": "https://demo-api.axis.markets/",
   "priceStddev": 0.04,
   "amountMin": 0.05,
   "amountMax": 0.2,
