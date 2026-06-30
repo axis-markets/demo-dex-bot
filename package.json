@@ -13,21 +13,14 @@
     "test": "jest"
   },
   "dependencies": {
-    "@axis-markets/contract-client": "github:axis-markets/contract-client#v0.2.0",
-    "@stellar/stellar-base": "15.0.0",
-    "@stellar/stellar-sdk": "15.1.0",
+    "@axis-markets/client": "0.4.0",
+    "@stellar/stellar-sdk": "16.0.1",
     "dotenv": "16.4.7"
   },
   "overrides": {
-    "@stellar/stellar-base": "15.0.0",
-    "@stellar/stellar-sdk": "15.1.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@axis-markets/contract-client"
-    ]
+    "@stellar/stellar-sdk": "16.0.1"
   },
   "devDependencies": {
-    "jest": "29.7.0"
+    "jest": "30.4.2"
   }
 }

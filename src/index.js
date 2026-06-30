@@ -2,11 +2,9 @@ const {Keypair} = require('@stellar/stellar-sdk')
 const cfg = require('./config.js')
 const {makeSignTransaction} = require('./sign-keypair.js')
 const TradingBot = require('./trading-bot.js')
+const {AxisContractClient, OrderKind} = require('@axis-markets/client')
 
 ;(async () => {
-    //contract-client is published as ESM-only — load via dynamic import from CJS
-    const {AxisContractClient, OrderKind} = await import('@axis-markets/contract-client/src/index.js')
-
     const keypair = Keypair.fromSecret(cfg.traderSecret)
     const axis = new AxisContractClient({
         publicKey: keypair.publicKey(),

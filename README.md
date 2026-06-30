@@ -63,7 +63,7 @@ The traded universe is defined entirely by the `tokens` list in the config file 
 
 | File | Responsibility |
 |------|----------------|
-| [src/index.js](src/index.js) | Entry point. Loads config, builds the Stellar keypair, dynamically imports the ESM-only `@axis-markets/contract-client`, constructs `AxisContractClient`, starts the bot, and handles graceful shutdown on `SIGINT`/`SIGTERM`. |
+| [src/index.js](src/index.js) | Entry point. Loads config, builds the Stellar keypair, dynamically imports the ESM-only `@axis-markets/client`, constructs `AxisContractClient`, starts the bot, and handles graceful shutdown on `SIGINT`/`SIGTERM`. |
 | [src/trading-bot.js](src/trading-bot.js) | The `TradingBot` class — the scheduling loop, single-trade logic (`tradeOnce`), order-book fetch, and global `maxPositions` enforcement. |
 | [src/config.js](src/config.js) | Resolves the config name from `CONFIG_NAME` (env), loads & validates `./<name>.config.json`, and reads `TRADER_SECRET` from env. Throws on a missing secret, unreadable file, or invalid tokens. |
 | [src/indexer-client.js](src/indexer-client.js) | HTTP client for the AXIS indexer's `/order` endpoint, with cursor-based pagination (`getOrdersPaginated`). |
@@ -96,7 +96,7 @@ The traded universe is defined entirely by the `tokens` list in the config file 
 pnpm install
 ```
 
-The AXIS contract client (`@axis-markets/contract-client`) is installed from GitHub and built locally (listed under `pnpm.onlyBuiltDependencies`).
+The AXIS contract client (`@axis-markets/client`) is installed from GitHub and built locally (listed under `pnpm.onlyBuiltDependencies`).
 
 ---
 
@@ -185,13 +185,12 @@ Coverage spans the core modules:
 
 ## Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `@axis-markets/contract-client` | AXIS DEX contract client (ESM-only; imported dynamically). |
-| `@stellar/stellar-sdk` | Keypair, transactions, signing, RPC. |
-| `@stellar/stellar-base` | Stellar crypto / XDR primitives. |
-| `dotenv` | Loads `.env` into `process.env`. |
-| `jest` *(dev)* | Test runner. |
+| Package | Purpose                                                    |
+|---------|------------------------------------------------------------|
+| `@axis-markets/client` | AXIS DEX contract client (ESM-only; imported dynamically). |
+| `@stellar/stellar-sdk` | Stellar crypto, keypair, transactions, signing, RPC.       |
+| `dotenv` | Loads `.env` into `process.env`.                           |
+| `jest` *(dev)* | Test runner.                                               |
 
 ---
 
