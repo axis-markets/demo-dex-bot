@@ -31,6 +31,9 @@ function num(name, value) {
     return n
 }
 
+if (typeof parsed.axisContractId !== 'string' || !parsed.axisContractId)
+    throw new Error(`axisContractId is required in ${configPath}`)
+
 const decimals = num('decimals', parsed.decimals)
 
 if (!Array.isArray(parsed.tokens) || parsed.tokens.length < 2)
@@ -52,7 +55,7 @@ module.exports = {
     traderSecret: TRADER_SECRET,
     networkPassphrase: parsed.networkPassphrase || 'Test SDF Network ; September 2015',
     sorobanRpcUrl: (parsed.sorobanRpcUrl || 'https://soroban-testnet.stellar.org').replace(/\/$/, ''),
-    indexerUrl: (parsed.indexerUrl || 'http://localhost:8070').replace(/\/$/, ''),
+    indexerUrl: env('INDEXER_URL', parsed.indexerUrl || 'http://localhost:8070').replace(/\/$/, ''),
     axisContractId: parsed.axisContractId,
     decimals,
     priceStddev: num('priceStddev', parsed.priceStddev),

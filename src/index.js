@@ -2,9 +2,11 @@ const {Keypair} = require('@stellar/stellar-sdk')
 const cfg = require('./config.js')
 const {makeSignTransaction} = require('./sign-keypair.js')
 const TradingBot = require('./trading-bot.js')
-const {AxisContractClient, OrderKind} = require('@axis-markets/client')
+const TokenState = require('./token-state.js')
 
 ;(async () => {
+    //the client is an ES module; its CJS bundle is a build artifact of the linked checkout
+    const {AxisContractClient, OrderKind} = await import('@axis-markets/client')
     const keypair = Keypair.fromSecret(cfg.traderSecret)
     const axis = new AxisContractClient({
         publicKey: keypair.publicKey(),
@@ -13,8 +15,13 @@ const {AxisContractClient, OrderKind} = require('@axis-markets/client')
         contractId: cfg.axisContractId,
         networkPassphrase: cfg.networkPassphrase
     })
+    const tokenState = new TokenState({
+        rpcUrl: cfg.sorobanRpcUrl,
+        networkPassphrase: cfg.networkPassphrase,
+        spender: cfg.axisContractId
+    })
 
-    const bot = new TradingBot({axis, OrderKind, trader: keypair.publicKey(), config: cfg})
+    const bot = new TradingBot({axis, OrderKind, trader: keypair.publicKey(), config: cfg, tokenState})
 
     let shuttingDown = false
     function shutdown() {

@@ -2,20 +2,20 @@ const {indexerUrl} = require('./config.js')
 
 /**
  * @typedef {Object} IndexerOrder
- * @property {string} id
- * @property {'ACTIVE'|'FILLED'|'CANCELED'} status
- * @property {'LIMIT'} kind
+ * @property {string} id            decimal u128, derived from the owner and a nonce (not sequential)
+ * @property {'ACTIVE'|'FILLED'|'CANCELED'|'EXPIRED'} status
  * @property {string} buying
  * @property {string} selling
  * @property {string} price
  * @property {number} rprice
- * @property {string} quote
- * @property {string} amount
+ * @property {string} quote         selling amount at creation
+ * @property {string} amount        amount left to sell
+ * @property {string} [backed]      amount the maker can deliver, min(amount, balance, allowance), when the indexer tracks backing
  * @property {string} owner
- * @property {string} expires
+ * @property {string} [expires]
  * @property {string} [created]
  * @property {string} [updated]
- * @property {string} cursor
+ * @property {string} cursor        creation position, monotonic (pagination cursor)
  */
 
 async function request(path, params, signal) {

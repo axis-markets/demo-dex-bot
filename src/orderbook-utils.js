@@ -23,7 +23,9 @@ function invertPrice(price) {
  *
  *   - A maker order is eligible only when its assets mirror the taker's:
  *     `maker.selling === taker.buying` and `maker.buying === taker.selling`
- *     (the contract panics with InvalidMatch otherwise).
+ *     (the contract skips an order of another pair silently).
+ *   - Orders the indexer reports with no `backed` amount are left out: the
+ *     contract skips a fill its maker cannot back (`skip` event).
  *   - Every resting order stores `price` as a raw i128 "buying per selling" in
  *     its own orientation. The taker's `limitPrice` is the same i128 we pass to
  *     buy()/sell() ("buying per selling" for the taker). The contract crosses when:
@@ -34,7 +36,7 @@ function invertPrice(price) {
  * for the taker on both sides (it maximizes tokens received per token sent).
  * Capped at MAX_CROSS_IDS to bound transaction size.
  *
- * @param {Array<{id:string,status:string,selling:string,buying:string,price:string|bigint}>} rawOrders
+ * @param {Array<{id:string,status:string,selling:string,buying:string,price:string|bigint,backed?:string}>} rawOrders
  * @param {'buy'|'sell'} side
  * @param {bigint} limitPrice  taker limit as raw i128 — the exact value sent to buy()/sell()
  * @param {string} baseContract
@@ -67,6 +69,10 @@ function pickCrossingOrderIds(rawOrders, side, limitPrice, baseContract, quoteCo
             continue //unparseable price → skip rather than crash the tick
         }
         if (price <= 0n)
+            continue
+        //the contract holds no funds: an order its maker cannot back (balance or allowance
+        //gone) is skipped with a `skip` event and only wastes one of the MAX_CROSS_IDS slots
+        if (o.backed != null && BigInt(o.backed) <= 0n)
             continue
         if (maxExecPrice !== null && price > maxExecPrice)
             continue

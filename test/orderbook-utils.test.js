@@ -66,6 +66,15 @@ describe('pickCrossingOrderIds', () => {
         expect(pickCrossingOrderIds(orders, 'buy', raw('1.20'), BASE, QUOTE)).toEqual(['a3'])
     })
 
+    test('skips orders their makers cannot back, keeps untracked and partially backed ones', () => {
+        const orders = [
+            {...ask('a1', '1.10'), backed: '0'},
+            {...ask('a2', '1.12'), backed: '10'},
+            ask('a3', '1.15') //backing not tracked by the indexer
+        ]
+        expect(pickCrossingOrderIds(orders, 'buy', raw('1.20'), BASE, QUOTE)).toEqual(['a2', 'a3'])
+    })
+
     test('skips orders whose selling/buying don\'t mirror the taker', () => {
         const orders = [
             {id: 'x', status: 'ACTIVE', selling: 'OTHER', buying: QUOTE, price: raw('1.10').toString()},
