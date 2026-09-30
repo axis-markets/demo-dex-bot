@@ -17,12 +17,11 @@ On each trade tick the bot:
 3. **Picks a side** — buy or sell, 50/50 at random (no directional bias).
 4. **Picks a price** — drawn from a Gaussian (normal) distribution centered on the reference price with a **relative** standard deviation `referencePrice × priceStddev` (clamped to a small positive minimum).
 5. **Picks an amount** — a **USD** value drawn uniformly from `[amountMin, amountMax]`, converted to base-token units by dividing by the base token's reference price.
-6. **Fetches a fresh order book** snapshot for the pair from the AXIS indexer, together with its own orders selling the same token, its allowance on that token (Stellar RPC) and the latest ledger.
-7. **Selects crossing orders** — resting orders that cross its limit price (cheapest asks when buying, highest bids when selling) and that their makers can back, best-first, capped at **20** order IDs to bound transaction size.
-8. **Sizes the allowance** — the AXIS contract holds no funds: fills are settled with `transfer_from` against the maker's balance and the allowance granted to the contract. When the current allowance on the selling token is short of this trade plus the bot's resting orders selling that token, the trade carries an `approve` for exactly that sum (about 30 days of ledgers).
-9. **Submits the order** via `axis.buy()` / `axis.sell()` as a `Limit` order, passing the crossing IDs to fill against.
-10. **Enforces the position cap** — if its active orders **across all pairs** exceed `maxPositions`, it cancels the oldest ones (by creation position; order ids are not sequential).
-11. **Reschedules** the next tick at a random delay between `tradeMin` and `tradeMax` seconds.
+6. **Submits a `Limit` order** through its `AxisAccount` (`@axis-markets/client`): `account.buy()` / `account.sell()` looks up the crossing orders with a direct-market Aggregator quote and sizes the allowance. The AXIS contract holds no funds: fills are settled with `transfer_from` against the maker's balance and the allowance granted to the contract. When the allowance on the selling token (pushed by the Aggregator, whose data source streams the bot account's balances and allowances per ledger; read over Stellar RPC only while that state is not current) is short of this trade plus the bot's open orders selling that token, the trade carries an `approve` for exactly that sum (about 30 days of ledgers).
+7. **Enforces the position cap** — if its open orders **across all pairs** exceed `maxPositions`, it cancels the oldest ones (by creation position; order ids are not sequential).
+8. **Reschedules** the next tick at a random delay between `tradeMin` and `tradeMax` seconds.
+
+The open orders and the backing of the bot's account live in the `AxisAccount` memory, kept current by the Aggregator WebSocket push API (REST polling while it is down), so a tick makes no order-book or own-orders requests; orders the bot created count as committed until the indexer reports them. Fills and expirations of its orders are logged as they are pushed.
 
 The traded universe is defined entirely by the `tokens` list in the config file (the testnet defaults are USDC, EURC, XLM, CETES). The process is stateless — all state lives in memory and on-chain; nothing is persisted to disk.
 
@@ -31,46 +30,38 @@ The traded universe is defined entirely by the `tokens` list in the config file 
 ## Architecture
 
 ```
-                         ┌──────────────────────────┐
-                         │   src/index.js (entry)    │
-                         │  load config + keypair    │
-                         │  init AxisContractClient   │
-                         │  wire SIGINT/SIGTERM       │
-                         └────────────┬──────────────┘
-                                      │
-                         ┌────────────▼──────────────┐
-                         │   src/trading-bot.js       │
-                         │   TradingBot               │
-                         │   schedule → trade → repeat │
-                         └───┬───────────┬─────────┬──┘
-                             │           │         │
-        ┌────────────────────▼──┐  ┌─────▼──────┐ ┌▼───────────────────┐
-        │ src/gauss-random.js    │  │ src/       │ │ src/orderbook-     │
-        │ side / price / amount  │  │ indexer-   │ │ utils.js           │
-        │ / delay sampling       │  │ client.js  │ │ pick crossing IDs  │
-        └────────────────────────┘  │ HTTP /order│ └────────────────────┘
-                                     │ pagination │
-        ┌────────────────────────┐  └────────────┘ ┌────────────────────┐
-        │ src/amount-format.js   │                 │ src/sign-keypair.js │
-        │ human → raw i128       │                 │ tx signing callback │
-        │ display price → i128   │                 │ (Stellar keypair)   │
-        └────────────────────────┘                 └────────────────────┘
-                                     │
-                              ┌──────▼──────┐        ┌──────────────┐
-                              │ AXIS indexer │        │ Soroban RPC  │
-                              │ (order book) │        │ (contract)   │
-                              └──────────────┘        └──────────────┘
+              ┌──────────────────────────────────┐
+              │        src/index.js (entry)       │
+              │  load config + keypair            │
+              │  Axis (contract state, markets)   │
+              │  AxisAccount (orders, allowances) │
+              │  wire SIGINT/SIGTERM              │
+              └────────────────┬─────────────────┘
+                               │
+              ┌────────────────▼─────────────────┐
+              │        src/trading-bot.js         │
+              │  TradingBot                       │
+              │  schedule → trade → repeat        │
+              └───┬──────────────┬───────────┬───┘
+                  │              │           │
+   ┌──────────────▼───────┐ ┌────▼─────────┐ ┌▼────────────────────┐
+   │ src/gauss-random.js   │ │ src/amount-  │ │ src/sign-keypair.js  │
+   │ side / price / amount │ │ format.js    │ │ tx signing callback  │
+   │ / delay sampling      │ │ human → i128 │ │ (Stellar keypair)    │
+   └───────────────────────┘ └──────────────┘ └─────────────────────┘
+                               │
+            ┌──────────────────▼──────────────┐      ┌──────────────┐
+            │ AXIS Aggregator                  │      │ Stellar RPC  │
+            │ WebSocket push (orders, backing) │      │ (contract,   │
+            │ + REST (quotes)                  │      │  allowances) │
+            └──────────────────────────────────┘      └──────────────┘
 ```
 
 | File | Responsibility |
 |------|----------------|
-| [src/index.js](src/index.js) | Entry point. Loads config, builds the Stellar keypair, dynamically imports the ESM `@axis-markets/client`, constructs `AxisContractClient` and `TokenState`, starts the bot, and handles graceful shutdown on `SIGINT`/`SIGTERM`. |
-| [src/trading-bot.js](src/trading-bot.js) | The `TradingBot` class — the scheduling loop, single-trade logic (`tradeOnce`), order-book fetch, allowance planning, and global `maxPositions` enforcement. |
-| [src/token-state.js](src/token-state.js) | `TokenState` — Stellar RPC reads: the allowance granted to the AXIS contract on a token (simulated `allowance` call) and the latest ledger. |
-| [src/allowance.js](src/allowance.js) | `planApproval` (absolute approval covering the trade plus resting orders selling the token), `committedAmount`, `maxQuoteSpend` (ceiled quote cost of a buy). |
+| [src/index.js](src/index.js) | Entry point. Loads config, builds the Stellar keypair, dynamically imports the ESM `@axis-markets/client`, connects an `Axis` instance (contract state, markets) and the bot's `AxisAccount`, starts the bot, and handles graceful shutdown on `SIGINT`/`SIGTERM`. |
+| [src/trading-bot.js](src/trading-bot.js) | The `TradingBot` class — the scheduling loop, single-trade logic (`tradeOnce`), the 722 requote-and-retry, and global `maxPositions` enforcement over the account's open orders. |
 | [src/config.js](src/config.js) | Resolves the config name from `CONFIG_NAME` (env), loads & validates `./<name>.config.json`, and reads `TRADER_SECRET` from env. Throws on a missing secret, unreadable file, or invalid tokens. |
-| [src/indexer-client.js](src/indexer-client.js) | HTTP client for the AXIS indexer's `/order` endpoint, with cursor-based pagination (`getOrdersPaginated`). |
-| [src/orderbook-utils.js](src/orderbook-utils.js) | `pickCrossingOrderIds` — filters resting orders that cross the bot's price, sorts best-first, caps at `MAX_CROSS_IDS` (20). |
 | [src/amount-format.js](src/amount-format.js) | Decimal ↔ raw integer conversion. `humanToRaw` (truncating, string-safe) and `displayPriceToContract` (scales a quote-per-base price to the contract's i128 representation). |
 | [src/gauss-random.js](src/gauss-random.js) | Random samplers: `gaussRandom`, `uniform`, `randomInt`, `randomSide`, and `sampleTwo` (random distinct pair). |
 | [src/sign-keypair.js](src/sign-keypair.js) | Builds the `signTransaction` callback backed by a Stellar `Keypair` and network passphrase. |
@@ -78,10 +69,9 @@ The traded universe is defined entirely by the `tokens` list in the config file 
 ### Notable implementation details
 
 - **Price scaling** (`displayPriceToContract`): `contract_price = displayPrice × 10^(18 + quoteDecimals − baseDecimals)`. All tokens share a single `decimals`, so this reduces to `× 10^18`. Pass prices as strings to avoid IEEE-754 drift at large scale.
-- **Crossing logic**: `pickCrossingOrderIds` mirrors the contract's `match_orders` exactly, comparing the maker's raw i128 `price` ("buying per selling") against the taker's limit — `order.price ≤ limit` for a buy, `order.price ≤ invert(limit)` for a sell — so the ids sent only include orders the contract will actually fill. It does **not** rely on the indexer's `rprice`. Orders the indexer reports with `backed: 0` (maker balance or allowance gone) are left out: the contract would skip them with a `skip` event. See [src/orderbook-utils.js](src/orderbook-utils.js).
-- **Allowances**: an approval is absolute, so it is sized to this trade plus every resting order selling the same token; otherwise it would leave those orders unbacked. For a buy the trade needs at most `ceil(amount × price / 10^18)` quote tokens.
+- **Crossing and allowances**: handled by `AxisAccount`. The crossing orders come from a direct-market Aggregator quote for the trade amount (orders beyond the limit price are skipped by the contract). An approval is absolute, so it is sized to this trade plus every open order selling the same token; otherwise it would leave those orders unbacked. For a buy the trade needs at most `ceil(amount × price / 10^18)` quote tokens.
 - **Amount semantics**: the order `amount` is always expressed in **base** raw units for both `buy()` and `sell()`.
-- **Resilience**: a failed trade tick is caught and logged; the loop reschedules and continues. Limit orders are valued with an oracle price the contract caches for 72 h and refreshes only on `requote`/`subsidize`: when a trade fails with `AssetPriceOracleFetchFailed` (722), the bot calls the permissionless `requote` for the market (sent only when it caches a newer price) and retries the trade once; when that fails too, it leaves the market out for 5 minutes, so an oracle that stops publishing an asset does not turn every tick into a failure.
+- **Resilience**: a failed trade tick is caught and logged; the loop reschedules and continues. Limit orders are valued with an oracle price the contract caches for 72 h and refreshes only on `requote`/`subsidize`: when a trade fails with `AssetPriceOracleFetchFailed` (722), the bot calls the permissionless `requote` for the market (`AxisMarket.requote()`) (sent only when it caches a newer price) and retries the trade once; when that fails too, it leaves the market out for 5 minutes, so an oracle that stops publishing an asset does not turn every tick into a failure.
 
 ---
 
@@ -131,7 +121,7 @@ The selected file (e.g. [testnet.config.json](testnet.config.json)) holds all no
 | `axisContractId` | `CBEZ…LDFK` | AXIS DEX contract ID. |
 | `networkPassphrase` | `Test SDF Network ; September 2015` | Stellar network passphrase (defaults to testnet if omitted). |
 | `sorobanRpcUrl` | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint. Defaults to testnet; trailing slash stripped. |
-| `indexerUrl` | `http://localhost:8070` | AXIS indexer base URL. Defaults shown; trailing slash stripped. |
+| `indexerUrl` | `http://localhost:8070` | AXIS Aggregator base URL (REST; the WebSocket push API is `<indexerUrl>/ws`). Defaults shown; trailing slash stripped. |
 | `decimals` | `7` | Decimal precision **shared by all tokens**. |
 | `priceStddev` | `0.04` | **Relative** standard deviation of the price distribution (fraction of the reference price). |
 | `amountMin` / `amountMax` | `0.01` / `0.2` | Order-size range in **USD**, sampled uniformly, then converted to base-token units by dividing by the base token's reference price. |
@@ -179,12 +169,9 @@ Coverage spans the core modules:
 | Test file | Focus |
 |-----------|-------|
 | [test/config.test.js](test/config.test.js) | Config-name selection, file load, defaults, and validation (missing secret, unreadable file, bad tokens). |
-| [test/trading-bot.test.js](test/trading-bot.test.js) | Random-pair selection, buy/sell payload routing, order-book fetch, allowance approvals, global position-cap enforcement, lifecycle. |
-| [test/orderbook-utils.test.js](test/orderbook-utils.test.js) | Crossing-order selection, side filtering, price thresholds, unbacked orders, ID cap. |
-| [test/allowance.test.js](test/allowance.test.js) | Committed amount, approval sizing, quote spend rounding. |
+| [test/trading-bot.test.js](test/trading-bot.test.js) | Random-pair selection, buy/sell routing through the account, 722 requote-and-retry and market pause, global position-cap enforcement, lifecycle. |
 | [test/amount-format.test.js](test/amount-format.test.js) | Decimal-to-raw scaling, price conversion, truncation behavior. |
 | [test/gauss-random.test.js](test/gauss-random.test.js) | Statistical properties of the samplers, including `sampleTwo` distinctness. |
-| [test/indexer-client.test.js](test/indexer-client.test.js) | Query building, pagination, error handling. |
 | [test/sign-keypair.test.js](test/sign-keypair.test.js) | Transaction signing. |
 
 ---
@@ -193,7 +180,7 @@ Coverage spans the core modules:
 
 | Package | Purpose                                                    |
 |---------|------------------------------------------------------------|
-| `@axis-markets/client` | AXIS DEX contract client (ESM; imported dynamically, linked from `../axis-contract-client`). |
+| `@axis-markets/client` | AXIS DEX client: `Axis` / `AxisAccount` (ESM; imported dynamically, linked from `../axis-contract-client`). |
 | `@stellar/stellar-sdk` | Stellar crypto, keypair, transactions, signing, RPC.       |
 | `dotenv` | Loads `.env` into `process.env`.                           |
 | `jest` *(dev)* | Test runner.                                               |
