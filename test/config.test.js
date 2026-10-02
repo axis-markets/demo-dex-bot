@@ -27,8 +27,8 @@ function load(json, {secret = 'SABC', name} = {}) {
     jest.resetModules()
     process.env = {...OLD_ENV}
     delete process.env.CONFIG_NAME
-    if (secret == null) delete process.env.TRADER_SECRET
-    else process.env.TRADER_SECRET = secret
+    if (secret == null) delete process.env.TRADER_SECRETS
+    else process.env.TRADER_SECRETS = secret
     if (name) process.env.CONFIG_NAME = name
     mockReadFile = () => {
         if (json instanceof Error) throw json
@@ -43,7 +43,7 @@ describe('config loader', () => {
     test('loads JSON values, exposes camelCase keys, strips trailing slashes', () => {
         const cfg = load(VALID)
         expect(cfg.configName).toBe('testnet')
-        expect(cfg.traderSecret).toBe('SABC')
+        expect(cfg.traderSecrets).toEqual(['SABC'])
         expect(cfg.axisContractId).toBe('C_AXIS')
         expect(cfg.sorobanRpcUrl).toBe('https://rpc.example')
         expect(cfg.indexerUrl).toBe('http://indexer.example')
@@ -57,7 +57,7 @@ describe('config loader', () => {
     test('selects the config file by CONFIG_NAME', () => {
         let pathArg
         jest.resetModules()
-        process.env = {...OLD_ENV, TRADER_SECRET: 'SABC', CONFIG_NAME: 'mainnet'}
+        process.env = {...OLD_ENV, TRADER_SECRETS: 'SABC', CONFIG_NAME: 'mainnet'}
         mockReadFile = (p) => { pathArg = p; return JSON.stringify(VALID) }
         const cfg = require('../src/config.js')
         expect(cfg.configName).toBe('mainnet')
@@ -72,8 +72,24 @@ describe('config loader', () => {
         expect(cfg.indexerUrl).toBe('http://localhost:8070')
     })
 
-    test('throws when TRADER_SECRET is missing', () => {
-        expect(() => load(VALID, {secret: null})).toThrow(/TRADER_SECRET/)
+    test('splits TRADER_SECRETS on commas and whitespace', () => {
+        const cfg = load(VALID, {secret: ' SA1, SA2,SA3 ,, '})
+        expect(cfg.traderSecrets).toEqual(['SA1', 'SA2', 'SA3'])
+    })
+
+    test('throws when TRADER_SECRETS is missing or empty', () => {
+        expect(() => load(VALID, {secret: null})).toThrow(/TRADER_SECRETS is required/)
+        expect(() => load(VALID, {secret: ' , '})).toThrow(/TRADER_SECRETS is required/)
+    })
+
+    test('accepts up to 10 traders', () => {
+        const keys = Array.from({length: 10}, (_, i) => 'SA' + i)
+        expect(load(VALID, {secret: keys.join(',')}).traderSecrets).toHaveLength(10)
+        expect(() => load(VALID, {secret: [...keys, 'SA10'].join(',')})).toThrow(/at most 10 traders/)
+    })
+
+    test('throws on a duplicate trader key', () => {
+        expect(() => load(VALID, {secret: 'SA1,SA2,SA1'})).toThrow(/more than once/)
     })
 
     test('throws a clear error when the config file cannot be read', () => {

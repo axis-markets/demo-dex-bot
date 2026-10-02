@@ -17,10 +17,17 @@ function pairKey(a, b) {
 }
 
 /**
+ * @typedef {Object} Trader
+ * @property {string} label   log prefix, e.g. "trader 1"
+ * @property {import('@axis-markets/client').AxisAccount} account   the trader's account: open orders and backing in
+ *   memory, trading with automatic crossing lookup and allowances
+ * @property {import('@axis-markets/client').Signer} signer   the account signer, the source of its requotes
+ */
+
+/**
  * @typedef {Object} TradingBotDeps
  * @property {import('@axis-markets/client').Axis} axis   DEX state (markets, requote)
- * @property {import('@axis-markets/client').AxisAccount} account   the bot's account: open orders in memory, trading
- *   with automatic crossing lookup and allowances
+ * @property {Trader[]} traders   virtual traders, each trading from its own account
  * @property {Object} OrderKind    {Limit, Fill, FillOrKill}
  * @property {Object} config       resolved config module
  */
@@ -39,16 +46,24 @@ class TradingBot {
     stopped = false
 
     /**
-     * Markets left out until the given time (ms) after the contract found no oracle price for them
+     * Markets left out until the given time (ms) after the contract found no oracle price for them, shared by all
+     * traders: the price is a market property
      * @type {Map<string, number>}
      * @private
      */
     unpriced = new Map()
 
+    /**
+     * Requotes in flight by market key
+     * @type {Map<string, Promise>}
+     * @private
+     */
+    requotes = new Map()
+
     /** @param {TradingBotDeps} deps */
-    constructor({axis, account, OrderKind, config}) {
+    constructor({axis, traders, OrderKind, config}) {
         this.axis = axis
-        this.account = account
+        this.traders = traders
         this.OrderKind = OrderKind
         this.cfg = config
     }
@@ -74,22 +89,42 @@ class TradingBot {
     /** @private */
     async runTradeTick() {
         if (this.stopped) return
-        try {
-            await this.tradeOnce()
-        } catch (e) {
-            console.error('[bot] trade failed:', e.message || e)
-        }
+        //every trader trades on the same tick, in parallel: each one signs from its own account (own sequence)
+        await Promise.all(this.traders.map(trader => this.tradeOnce(trader).catch(e => {
+            console.error(`[${trader.label}] trade failed:`, e.message || e)
+        })))
         this.scheduleTrade(randomInt(this.cfg.tradeMin, this.cfg.tradeMax) * 1000)
     }
 
-    /** @private */
-    async tradeOnce() {
-        const {tokens, decimals, priceStddev, amountMin, amountMax} = this.cfg
+    /**
+     * Configured tokens the trader holds an authorized trustline to and a spendable balance in
+     * @param {Trader} trader
+     * @return {Array<{token: string, symbol: string, price: number}>}
+     */
+    tradableTokens(trader) {
+        return this.cfg.tokens.filter(t => {
+            const {known, authorized, balance} = trader.account.getAllowance(t.token)
+            return known && authorized && balance > 0n
+        })
+    }
 
+    /**
+     * @param {Trader} trader
+     * @private
+     */
+    async tradeOnce(trader) {
+        const {decimals, priceStddev, amountMin, amountMax} = this.cfg
+        const {label, account} = trader
+
+        const tokens = this.tradableTokens(trader)
+        if (tokens.length < 2) {
+            console.log(`[${label}] needs 2+ tradable tokens (trustline and balance), has: ${tokens.map(t => t.symbol).join(',') || 'none'}, skipping`)
+            return
+        }
         //pick a random pair; reference price = USD cross price (quote per base)
         const pair = this.pickPair(tokens)
         if (!pair) {
-            console.log('[bot] no market has an oracle price, skipping')
+            console.log(`[${label}] no market has an oracle price, skipping`)
             return
         }
         const [base, quote] = pair
@@ -115,8 +150,8 @@ class TradingBot {
         //every resting order selling the same token (the contract holds no funds)
         const params = {kind: this.OrderKind.Limit, selling, buying, amount, price}
 
-        console.log(`[bot] ${side.toUpperCase()} ${amountStr} ${base.symbol} (~$${amountUsd.toFixed(4)})/${quote.symbol} @ ${priceStr} (ref ${referencePrice.toFixed(7)})`)
-        const submit = () => side === 'buy' ? this.account.buy(params) : this.account.sell(params)
+        console.log(`[${label}] ${side.toUpperCase()} ${amountStr} ${base.symbol} (~$${amountUsd.toFixed(4)})/${quote.symbol} @ ${priceStr} (ref ${referencePrice.toFixed(7)})`)
+        const submit = () => side === 'buy' ? account.buy(params) : account.sell(params)
         let result
         try {
             result = await submit()
@@ -126,36 +161,44 @@ class TradingBot {
             //limit orders are valued with a cached oracle price that expires after 72h and is
             //refreshed only by the permissionless `requote`: refresh it and retry once (the failed
             //attempt was rejected at simulation, nothing was sent)
-            console.log(`[bot] no cached oracle price for ${base.symbol}/${quote.symbol}, requoting the market`)
-            await this.requote(selling, buying)
+            console.log(`[${label}] no cached oracle price for ${base.symbol}/${quote.symbol}, requoting the market`)
+            await this.requote(trader, base, quote)
             try {
                 result = await submit()
             } catch (retryError) {
                 if (retryError?.code === PRICE_FETCH_FAILED) {
                     //the oracle has no usable price either: leave the market out for a while
-                    console.log(`[bot] oracle has no price for ${base.symbol}/${quote.symbol}, pausing the market for ${UNPRICED_COOLDOWN / 60000} min`)
+                    console.log(`[${label}] oracle has no price for ${base.symbol}/${quote.symbol}, pausing the market for ${UNPRICED_COOLDOWN / 60000} min`)
                     this.unpriced.set(pairKey(base, quote), Date.now() + UNPRICED_COOLDOWN)
                 }
                 throw retryError
             }
         }
         const {sold, bought, orderId, approve} = result
-        console.log(`[bot] result: sold=${sold} bought=${bought} newOrderId=${orderId}${approve ? ` approved=${approve.amount}` : ''}`)
+        console.log(`[${label}] result: sold=${sold} bought=${bought} newOrderId=${orderId}${approve ? ` approved=${approve.amount}` : ''}`)
 
-        await this.enforceMaxPositions()
+        await this.enforceMaxPositions(trader)
     }
 
     /**
-     * Refresh the cached oracle prices of the market (either asset order)
+     * Refresh the cached oracle prices of the market, signed by the trader: another trader's account may be sending a
+     * transaction at the same time. Traders requoting the same market concurrently share one call.
+     * @param {Trader} trader
+     * @param {{token: string}} base
+     * @param {{token: string}} quote
      * @private
-     * @param {string} selling
-     * @param {string} buying
      */
-    async requote(selling, buying) {
-        const market = this.axis.getMarket(selling, buying)
-        if (!market)
-            throw new Error('The market is not open')
-        await market.requote()
+    async requote(trader, base, quote) {
+        const key = pairKey(base, quote)
+        let pending = this.requotes.get(key)
+        if (!pending) {
+            const market = this.axis.getMarket(base.token, quote.token)
+            if (!market)
+                throw new Error('The market is not open')
+            pending = market.requote(trader.signer).finally(() => this.requotes.delete(key))
+            this.requotes.set(key, pending)
+        }
+        await pending
     }
 
     /**
@@ -181,20 +224,22 @@ class TradingBot {
     }
 
     /**
-     * Cancel the oldest open orders beyond the position cap (across all markets). The open orders come from the
-     * account memory, which includes the orders just created and not reported by the indexer yet.
+     * Cancel the trader's oldest open orders beyond the position cap (across all markets). The open orders come from
+     * the account memory, which includes the orders just created and not reported by the indexer yet.
+     * @param {Trader} trader
      * @private
      */
-    async enforceMaxPositions() {
+    async enforceMaxPositions(trader) {
+        const {label, account} = trader
         //newest first: by creation position (`cursor`), unconfirmed ones on top
-        const open = this.account.getOrders()
+        const open = account.getOrders()
         if (open.length <= this.cfg.maxPositions) {
-            console.log(`[bot] active positions: ${open.length}/${this.cfg.maxPositions}`)
+            console.log(`[${label}] active positions: ${open.length}/${this.cfg.maxPositions}`)
             return
         }
         const toCancel = open.slice(this.cfg.maxPositions).map(o => o.id)
-        console.log(`[bot] evicting ${toCancel.length} oldest orders: ${toCancel.join(',')}`)
-        await this.account.cancel(toCancel)
+        console.log(`[${label}] evicting ${toCancel.length} oldest orders: ${toCancel.join(',')}`)
+        await account.cancel(toCancel)
     }
 }
 

@@ -6,29 +6,32 @@ const TradingBot = require('./trading-bot.js')
 ;(async () => {
     //the client is an ES module
     const {Axis, OrderKind} = await import('@axis-markets/client')
-    const keypair = Keypair.fromSecret(cfg.traderSecret)
-    const signer = {
-        publicKey: keypair.publicKey(),
-        signTransaction: makeSignTransaction(keypair, cfg.networkPassphrase)
-    }
-    //contract state and markets, pushed by the Aggregator over a WebSocket
+    //no default signer: every transaction, requotes included, is signed by the trader that sends it
     const axis = new Axis({
         apiUrl: cfg.indexerUrl,
         rpcUrl: cfg.sorobanRpcUrl,
         contractId: cfg.axisContractId,
-        networkPassphrase: cfg.networkPassphrase,
-        signer
+        networkPassphrase: cfg.networkPassphrase
     })
     axis.on('connection', open => console.log(`[bot] aggregator push connection ${open ? 'open' : 'lost, polling'}`))
     await axis.connect()
-    //the bot's open orders and backing in memory; trades carry the approvals they need
-    const account = axis.account(signer.publicKey, {signTransaction: signer.signTransaction})
-    account.on('fill', ({order, sold, bought}) => console.log(`[bot] order ${order.id} partially filled: sold ${sold}, bought ${bought}`))
-    account.on('filled', ({order, sold, bought}) => console.log(`[bot] order ${order.id} filled: sold ${sold}, bought ${bought}`))
-    account.on('expire', order => console.log(`[bot] order ${order.id} expired`))
-    await account.ready
+    //each trader's open orders and backing in memory, over the shared connection; trades carry the approvals they need
+    const traders = cfg.traderSecrets.map((secret, i) => {
+        const keypair = Keypair.fromSecret(secret)
+        const signer = {
+            publicKey: keypair.publicKey(),
+            signTransaction: makeSignTransaction(keypair, cfg.networkPassphrase)
+        }
+        const label = `trader ${i + 1}`
+        const account = axis.account(signer.publicKey, {signTransaction: signer.signTransaction})
+        account.on('fill', ({order, sold, bought}) => console.log(`[${label}] order ${order.id} partially filled: sold ${sold}, bought ${bought}`))
+        account.on('filled', ({order, sold, bought}) => console.log(`[${label}] order ${order.id} filled: sold ${sold}, bought ${bought}`))
+        account.on('expire', order => console.log(`[${label}] order ${order.id} expired`))
+        return {label, account, signer}
+    })
+    await Promise.all(traders.map(t => t.account.ready))
 
-    const bot = new TradingBot({axis, account, OrderKind, config: cfg})
+    const bot = new TradingBot({axis, traders, OrderKind, config: cfg})
 
     let shuttingDown = false
     function shutdown() {
@@ -42,9 +45,13 @@ const TradingBot = require('./trading-bot.js')
     process.on('SIGINT', shutdown)
     process.on('SIGTERM', shutdown)
 
-    console.log(`[bot] config=${cfg.configName} trader=${keypair.publicKey()}`)
-    console.log(`[bot] tokens=${cfg.tokens.map(t => t.symbol).join(',')} stddev=${cfg.priceStddev} amount=(${cfg.amountMin}..${cfg.amountMax}) maxPositions=${cfg.maxPositions}`)
-    console.log(`[bot] aggregator=${cfg.indexerUrl} rpc=${cfg.sorobanRpcUrl} contract=${cfg.axisContractId} markets=${axis.markets.size} open orders=${account.orders.size}`)
+    console.log(`[bot] config=${cfg.configName} traders=${traders.length}`)
+    console.log(`[bot] tokens=${cfg.tokens.map(t => t.symbol).join(',')} stddev=${cfg.priceStddev} amount=(${cfg.amountMin}..${cfg.amountMax}) maxPositions=${cfg.maxPositions} per trader`)
+    console.log(`[bot] aggregator=${cfg.indexerUrl} rpc=${cfg.sorobanRpcUrl} contract=${cfg.axisContractId} markets=${axis.markets.size}`)
+    for (const trader of traders) {
+        const tradable = bot.tradableTokens(trader).map(t => t.symbol).join(',') || 'none'
+        console.log(`[${trader.label}] address=${trader.account.address} open orders=${trader.account.orders.size} tradable=${tradable}`)
+    }
     bot.start()
 })().catch(e => {
     console.error('[bot] fatal:', e)

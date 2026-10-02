@@ -10,9 +10,17 @@ function env(name, fallback) {
     return s.length ? s : fallback
 }
 
-const TRADER_SECRET = env('TRADER_SECRET', null)
-if (!TRADER_SECRET)
-    throw new Error('TRADER_SECRET is required (set it in .env or environment)')
+//most virtual traders the bot runs, one account each
+const MAX_TRADERS = 10
+
+const TRADER_SECRETS = env('TRADER_SECRETS', '').split(/[\s,]+/).filter(Boolean)
+if (!TRADER_SECRETS.length)
+    throw new Error('TRADER_SECRETS is required (comma-separated secret keys, set it in .env or environment)')
+if (TRADER_SECRETS.length > MAX_TRADERS)
+    throw new Error(`TRADER_SECRETS lists ${TRADER_SECRETS.length} keys, at most ${MAX_TRADERS} traders are supported`)
+//a duplicate would share one account and its transaction sequence with another trader
+if (new Set(TRADER_SECRETS).size !== TRADER_SECRETS.length)
+    throw new Error('TRADER_SECRETS lists the same key more than once')
 
 const CONFIG_NAME = env('CONFIG_NAME', 'testnet')
 const configPath = path.resolve(process.cwd(), `${CONFIG_NAME}.config.json`)
@@ -52,7 +60,7 @@ const tokens = parsed.tokens.map((t, i) => {
 
 module.exports = {
     configName: CONFIG_NAME,
-    traderSecret: TRADER_SECRET,
+    traderSecrets: TRADER_SECRETS,
     networkPassphrase: parsed.networkPassphrase || 'Test SDF Network ; September 2015',
     sorobanRpcUrl: (parsed.sorobanRpcUrl || 'https://soroban-testnet.stellar.org').replace(/\/$/, ''),
     indexerUrl: env('INDEXER_URL', parsed.indexerUrl || 'http://localhost:8070').replace(/\/$/, ''),
