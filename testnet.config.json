@@ -7,8 +7,8 @@
   "amountMin": 0.05,
   "amountMax": 0.2,
   "maxPositions": 100,
-  "tradeMin": 6,
-  "tradeMax": 7,
+  "tradeMin": 20,
+  "tradeMax": 50,
   "decimals": 7,
   "tokens": [
     {
