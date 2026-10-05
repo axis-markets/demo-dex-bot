@@ -4,7 +4,6 @@ jest.mock('fs', () => ({readFileSync: (...args) => mockReadFile(...args)}))
 jest.mock('dotenv', () => ({config: () => ({})}))
 
 const VALID = {
-    axisContractId: 'C_AXIS',
     networkPassphrase: 'Test SDF Network ; September 2015',
     sorobanRpcUrl: 'https://rpc.example/',
     indexerUrl: 'http://indexer.example/',
@@ -44,7 +43,7 @@ describe('config loader', () => {
         const cfg = load(VALID)
         expect(cfg.configName).toBe('testnet')
         expect(cfg.traderSecrets).toEqual(['SABC'])
-        expect(cfg.axisContractId).toBe('C_AXIS')
+        expect(cfg.axisContractId).toBeUndefined()
         expect(cfg.sorobanRpcUrl).toBe('https://rpc.example')
         expect(cfg.indexerUrl).toBe('http://indexer.example')
         expect(cfg.decimals).toBe(7)
@@ -94,6 +93,11 @@ describe('config loader', () => {
 
     test('throws a clear error when the config file cannot be read', () => {
         expect(() => load(new Error('ENOENT'))).toThrow(/Cannot load config "testnet"/)
+    })
+
+    test('passes a pinned contract address through and rejects an invalid one', () => {
+        expect(load({...VALID, axisContractId: 'C_AXIS'}).axisContractId).toBe('C_AXIS')
+        expect(() => load({...VALID, axisContractId: 42})).toThrow(/axisContractId must be a contract address/)
     })
 
     test('throws when fewer than 2 tokens', () => {

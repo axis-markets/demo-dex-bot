@@ -39,8 +39,9 @@ function num(name, value) {
     return n
 }
 
-if (typeof parsed.axisContractId !== 'string' || !parsed.axisContractId)
-    throw new Error(`axisContractId is required in ${configPath}`)
+//optional: the contract address comes from the aggregator, a pinned one must match it
+if (parsed.axisContractId != null && (typeof parsed.axisContractId !== 'string' || !parsed.axisContractId))
+    throw new Error(`axisContractId must be a contract address in ${configPath}`)
 
 const decimals = num('decimals', parsed.decimals)
 
@@ -64,7 +65,7 @@ module.exports = {
     networkPassphrase: parsed.networkPassphrase || 'Test SDF Network ; September 2015',
     sorobanRpcUrl: (parsed.sorobanRpcUrl || 'https://soroban-testnet.stellar.org').replace(/\/$/, ''),
     indexerUrl: env('INDEXER_URL', parsed.indexerUrl || 'http://localhost:8070').replace(/\/$/, ''),
-    axisContractId: parsed.axisContractId,
+    axisContractId: parsed.axisContractId || undefined,
     decimals,
     priceStddev: num('priceStddev', parsed.priceStddev),
     amountMin: num('amountMin', parsed.amountMin),

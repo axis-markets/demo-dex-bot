@@ -133,7 +133,7 @@ the repo, so **never put secrets in it**.
 
 | Key | Example | Description |
 |-----|---------|-------------|
-| `axisContractId` | `CBEZ…LDFK` | AXIS DEX contract ID. |
+| `axisContractId` | *(optional)* | AXIS DEX contract ID. Loaded from the aggregator (`/contract`) when omitted; when set, the bot refuses to start if the aggregator tracks another contract. |
 | `networkPassphrase` | `Test SDF Network ; September 2015` | Stellar network passphrase (defaults to testnet if omitted). |
 | `sorobanRpcUrl` | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint. Defaults to testnet; trailing slash stripped. |
 | `indexerUrl` | `http://localhost:8070` | AXIS Aggregator base URL (REST; the WebSocket push API is `<indexerUrl>/ws`). Defaults shown; trailing slash stripped. |
@@ -144,7 +144,7 @@ the repo, so **never put secrets in it**.
 | `tradeMin` / `tradeMax` | `5` / `10` | Delay range between trades, in **seconds**. |
 | `tokens` | *(array, ≥ 2)* | Tokens the traders may trade (each trader uses the ones it holds a trustline and balance in). Each: `{ "token": "C…", "symbol": "USDC", "price": 1 }` — contract address, friendly symbol for logs, and indicative **USD** price used to derive cross prices. |
 
-Validation runs at startup: the config file must be readable JSON with an `axisContractId`, `tokens` must hold at least
+Validation runs at startup: the config file must be readable JSON, `tokens` must hold at least
 two entries, and each token needs a `token`, `symbol`, and finite `price > 0`.
 
 ---
@@ -183,7 +183,7 @@ pnpm cancel-all   # node scripts/cancel-all-orders.js
 ```
 
 Cancels every open order of each trader account in `TRADER_SECRETS` (same `.env` and config file as the bot), the
-traders in parallel, up to 100 orders per transaction. Stop the bot first, otherwise it keeps placing new orders. The
+traders in parallel, in batches of 80 orders per transaction. Stop the bot first, otherwise it keeps placing new orders. The
 script exits with code 1 if any trader failed.
 
 ---
@@ -225,5 +225,5 @@ Coverage spans the core modules:
 - Never commit your `.env` or `TRADER_SECRETS`. The `*.config.json` files are committed, so keep secrets out of them —
   the trader secrets live only in env.
 - Use dedicated, low-balance accounts — this is demo software.
-- Default endpoints target Stellar **testnet**; double-check `networkPassphrase`, RPC, and contract IDs in your config
-  file before pointing at mainnet.
+- Default endpoints target Stellar **testnet**; double-check `networkPassphrase`, RPC, and the aggregator URL (it
+  supplies the contract address, pin `axisContractId` to verify it) in your config file before pointing at mainnet.

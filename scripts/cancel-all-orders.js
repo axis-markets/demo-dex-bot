@@ -13,7 +13,7 @@ const {makeSignTransaction} = require('../src/sign-keypair.js')
         networkPassphrase: cfg.networkPassphrase
     })
     await axis.connect()
-    console.log(`[cancel] config=${cfg.configName} traders=${cfg.traderSecrets.length} contract=${cfg.axisContractId}`)
+    console.log(`[cancel] config=${cfg.configName} traders=${cfg.traderSecrets.length} contract=${axis.contractId}`)
 
     const traders = cfg.traderSecrets.map((secret, i) => {
         const keypair = Keypair.fromSecret(secret)
