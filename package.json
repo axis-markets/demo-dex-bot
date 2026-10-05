@@ -13,6 +13,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "cancel-all": "node scripts/cancel-all-orders.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "dependencies": {

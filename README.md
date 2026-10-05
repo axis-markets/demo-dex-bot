@@ -176,6 +176,16 @@ then begins the loop. Sample output with two traders:
 
 Stop with **Ctrl+C** (`SIGINT`); the bot cancels its timer and exits cleanly.
 
+### Cancelling all open orders
+
+```bash
+pnpm cancel-all   # node scripts/cancel-all-orders.js
+```
+
+Cancels every open order of each trader account in `TRADER_SECRETS` (same `.env` and config file as the bot), the
+traders in parallel, up to 100 orders per transaction. Stop the bot first, otherwise it keeps placing new orders. The
+script exits with code 1 if any trader failed.
+
 ---
 
 ## Testing
